@@ -61,8 +61,8 @@ def spawn_instances(num_instances, boards_per_instance, root_dir):
         time.sleep(1)  # Optional delay between spawning instances
 
 if __name__ == "__main__":
-    num_instances = 20  # Number of instances to spawn
-    boards_per_instance = 10000000  # Number of boards each instance will handle
+    num_instances = 10  # Number of instances to spawn
+    boards_per_instance = 1000  # Number of boards each instance will handle
     root_dir = os.path.dirname(os.path.abspath(__file__))  # Root directory where cookies.txt and board_registration_and_testing.py are located
     
     spawn_instances(num_instances, boards_per_instance, root_dir)

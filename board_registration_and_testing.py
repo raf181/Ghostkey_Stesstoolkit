@@ -5,6 +5,7 @@ import time
 import sys
 import os
 from http.cookiejar import MozillaCookieJar
+from datetime import datetime
 
 # ANSI color codes for terminal output
 class colors:
@@ -40,12 +41,17 @@ def send_command_to_board_with_cookies(esp_id, command, cookies_file):
     }
     
     cookies_dict = parse_netscape_cookies(cookies_file)
-    response = requests.post(url, headers={'Content-Type': 'application/x-www-form-urlencoded'}, data=payload, cookies=cookies_dict)
-    if response.status_code == 200:
-        print(f"{colors.GREEN}Sent command '{command}' to ESP board '{esp_id}' successfully.{colors.END}")
-    else:
-        print(f"{colors.RED}Error: Failed to send command to ESP board '{esp_id}'.{colors.END}")
-    return esp_id, response
+    try:
+        response = requests.post(url, headers={'Content-Type': 'application/x-www-form-urlencoded'}, data=payload, cookies=cookies_dict, timeout=10)
+        if response.status_code == 200:
+            log(f"Sent command '{command}' to ESP board '{esp_id}' successfully.")
+            return True, response
+        else:
+            log(f"Error: Failed to send command to ESP board '{esp_id}'. Status code: {response.status_code}")
+            return False, response
+    except requests.exceptions.RequestException as e:
+        log(f"Error: Failed to send command to ESP board '{esp_id}'. Exception: {str(e)}")
+        return False, None
 
 # Function to retrieve and verify command using esp_id and esp_secret_key
 def retrieve_command_with_secret_key(esp_id, esp_secret_key):
@@ -54,16 +60,19 @@ def retrieve_command_with_secret_key(esp_id, esp_secret_key):
         'esp_id': esp_id,
         'esp_secret_key': esp_secret_key
     }
-    response = requests.get(url, params=params)
-    if response.status_code == 200:
-        data = response.json()
-        retrieved_command = data.get('command', '')
-        print(" ")
-        print(f"Retrieved command for ESP board '{esp_id}': '{retrieved_command}'")
-        return esp_id, retrieved_command
-    else:
-        print(f"{colors.RED}Failed to retrieve command for ESP board '{esp_id}'. Response status: {response.status_code}{colors.END}")
-    return None, None
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            retrieved_command = data.get('command', '')
+            log(f"Retrieved command for ESP board '{esp_id}': '{retrieved_command}'")
+            return True, response
+        else:
+            log(f"Failed to retrieve command for ESP board '{esp_id}'. Response status: {response.status_code}")
+            return False, response
+    except requests.exceptions.RequestException as e:
+        log(f"Error: Failed to retrieve command for ESP board '{esp_id}'. Exception: {str(e)}")
+        return False, None
 
 # Function to register boards and write to output file
 def register_board(server_url, cookies_file, start_id, end_id, output_file):
@@ -89,7 +98,7 @@ def register_board(server_url, cookies_file, start_id, end_id, output_file):
             # Check if board is already registered
             esp_id_str = f'esp32_{esp_id}'
             if any(board['esp_id'] == esp_id_str for board in existing_boards):
-                print(f"Skipping registration for ESP32 with ID '{esp_id_str}', already registered.")
+                log(f"Skipping registration for ESP32 with ID '{esp_id_str}', already registered.")
                 continue
 
             payload = {
@@ -98,21 +107,24 @@ def register_board(server_url, cookies_file, start_id, end_id, output_file):
             }
 
             # Send POST request
-            response = requests.post(endpoint, cookies=cookies, data=payload)
-
-            # Check response
-            if response.status_code == 200:
-                response_data = response.json()
-                if response_data.get('message') == 'ESP32 registered successfully':
-                    print(f"ESP32 with ID '{esp_id_str}' registered successfully with secret key: {esp_secret_key}.")
-                    registered_boards.append({
-                        'esp_id': esp_id_str,
-                        'esp_secret_key': esp_secret_key
-                    })
+            try:
+                response = requests.post(endpoint, cookies=cookies, data=payload, timeout=10)
+                if response.status_code == 200:
+                    response_data = response.json()
+                    if response_data.get('message') == 'ESP32 registered successfully':
+                        log(f"ESP32 with ID '{esp_id_str}' registered successfully with secret key: {esp_secret_key}.")
+                        registered_boards.append({
+                            'esp_id': esp_id_str,
+                            'esp_secret_key': esp_secret_key
+                        })
+                    else:
+                        log(f"Registration failed for {esp_id_str}. Server response: {response_data}")
                 else:
-                    print(f"Registration failed for {esp_id_str}. Server response: {response_data}")
-            else:
-                print(f"Failed to register {esp_id_str}. Status code: {response.status_code}")
+                    log(f"Failed to register {esp_id_str}. Status code: {response.status_code}")
+            except requests.exceptions.RequestException as e:
+                log(f"Error: Failed to register {esp_id_str}. Exception: {str(e)}")
+                input(f"{colors.YELLOW}Press Enter to continue...{colors.END}")
+                return
 
         # Append newly registered boards to existing list
         existing_boards.extend(registered_boards)
@@ -122,10 +134,19 @@ def register_board(server_url, cookies_file, start_id, end_id, output_file):
             json.dump(existing_boards, outfile, indent=4)
 
     except FileNotFoundError:
-        print(f"Error: {cookies_file} not found.")
+        log(f"Error: {cookies_file} not found.")
+        input(f"{colors.YELLOW}Press Enter to continue...{colors.END}")
 
     except Exception as e:
-        print(f"Error occurred: {e}")
+        log(f"Error occurred: {e}")
+        input(f"{colors.YELLOW}Press Enter to continue...{colors.END}")
+
+def log(message):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_message = f"[{timestamp}] {message}"
+    print(log_message)
+    with open('log.txt', 'a') as f:
+        f.write(log_message + '\n')
 
 # Main function to run the script
 def main():
@@ -139,9 +160,13 @@ def main():
     cookies_file = 'cookies.txt'
     output_file = f'output_{start_id}_to_{end_id}.json'  # Output file specific to this instance
 
+    log(f"Started instance for boards {start_id} to {end_id}")
+
     register_board(server_url, cookies_file, start_id, end_id, output_file)
 
     # Test commands (you can add your command testing logic here)
+
+    log(f"Finished instance for boards {start_id} to {end_id}")
 
 if __name__ == "__main__":
     main()
